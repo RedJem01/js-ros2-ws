@@ -26,8 +26,8 @@ rosdep --rosdistro=humble update
 
 
 cd /home/lcas/ws
-colcon build 
+#colcon build 
 add_source_bashrc "/opt/ros/lcas/install/setup.bash"
-add_source_bashrc "/home/lcas/ws/install/setup.bash"
-source /home/lcas/ws/install/setup.bash
+#add_source_bashrc "/home/lcas/ws/install/setup.bash"
+#source /home/lcas/ws/install/setup.bash
 
