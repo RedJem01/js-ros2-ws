@@ -27,6 +27,9 @@ class ColourChaser(Node):
         
         self.pushObject = False
         self.movedForwards = False
+        
+        self.leftRight = 0
+        self.callCount = 0
 
         #Publish cmd_vel topic to move the robot
         self.pub_cmd_vel = self.create_publisher(Twist, 'cmd_vel', 1)
@@ -61,76 +64,88 @@ class ColourChaser(Node):
         
         self.tw=Twist() #Twist message to publish
         
-        #If robot is currently in front of an object than pushObject = True
-        #This part runs twice every time push object is set to true, once to move forwards and then another to move backwards so that the robot can see if it still has the cube with it
-        if self.pushObject == True:
-            if self.movedForwards == False:
-                self.tw.linear.x = 1.0
-                self.movedForwards = True
-            else:
-                self.tw.linear.x = -2.0
-                self.movedForwards = False
-                self.pushObject = False
-                
+        #To stop robot getting confused between two cubes (if confused robot will turn left and right over and over again)
+        if self.count == 10 & self.leftRight == 10:
+            #Set big turn so that robot can stop the loop
+            self.tw.angular.x = 2.0
+            self.count = 0
+            self.leftRight = 0
         else:
-            if len(green_contours) > 0:
-                for c in green_contours:
-                    # find the centre of the contour: https://docs.opencv.org/3.4/d8/d23/classcv_1_1Moments.html
-                    M = cv2.moments(c) # only select the largest contour
-                    if M['m00'] > 0:
-                        # find the centroid of the contour
-                        cx = int(M['m10']/M['m00'])
-                        cy = int(M['m01']/M['m00'])
-                        
-                        #If contour is in the top half of the screen (is the wall)
-                        if cy <= data.height / 2:
-                            #If it is the only contour then turn, if not then go to next contour
-                            if len(green_contours) == 1:
-                                print("Wall is only contour, turning")
-                                self.tw.angular.z = 1.0
-                            continue
-                        
-                        # Draw a circle centered at centroid coordinates
-                        cv2.circle(current_frame, (round(cx), round(cy)), 5, (0, 255, 0), -1)
-                        
-                        #Find height/width of robot camera image from ros2 topic echo /camera/image_raw height: 1080 width: 1920
-
-                        #If center of object is to the left of image center move left
-                        if cx < 2.5 * data.width / 5:
-                            print("turning left")
-                            self.tw.angular.z = 0.3
-                        #Else if center of object is to the right of image center move right
-                        elif cx >= 3.5 * data.width / 5:
-                            print("turning right")
-                            self.tw.angular.z = -0.3
-                        else: 
-                            #If robot not at wall
-                            if self.scan.ranges[90] > 0.6:
-                                #Get the depth of the cube
-                                cubeDepth = (self.get_depth(current_frame, c) / 100)
-                                #If the difference between the wall and the cube is less than 0.03
-                                if (abs(self.scan.ranges[90] - cubeDepth)) < 0.03:
-                                    #Big turn so we don't keep getting stuck on the same cube again
-                                    self.tw.angular.z = 3.0
-                                    break
-                                
-                                #Move towards object
-                                print("Moving towards object")
-                                self.tw.angular.z = 0.0
-                                self.tw.linear.x = 0.5
-                                
-                                #Check if cube is at the very bottom of the screen and if it is then the robot is pushing the object
-                                if cy >= (3 * data.height / 4):
-                                    self.pushObject = True
-                                    break
-                            else:
-                                #If at the wall then big turn to see other cubes
-                                print("At wall, turning")
-                                self.tw.angular.z=3.0
-                        break                   
+            #If robot is currently in front of an object than pushObject = True
+            #This part runs twice every time push object is set to true, once to move forwards and then another to move backwards so that the robot can see if it still has the cube with it
+            if self.pushObject == True:
+                if self.movedForwards == False:
+                    self.tw.linear.x = 1.0
+                    self.movedForwards = True
+                else:
+                    self.tw.linear.x = -2.0
+                    self.movedForwards = False
+                    self.pushObject = False  
             else:
-                #Turn until we can see a coloured object
-                self.tw.angular.z=1.0
+                if len(green_contours) > 0:
+                    for c in green_contours:
+                        # find the centre of the contour: https://docs.opencv.org/3.4/d8/d23/classcv_1_1Moments.html
+                        M = cv2.moments(c) # only select the largest contour
+                        if M['m00'] > 0:
+                            # find the centroid of the contour
+                            cx = int(M['m10']/M['m00'])
+                            cy = int(M['m01']/M['m00'])
+                            
+                            #If contour is in the top half of the screen (is the wall)
+                            if cy <= data.height / 2:
+                                #If it is the only contour then turn, if not then go to next contour
+                                if len(green_contours) == 1:
+                                    print("Wall is only contour, turning")
+                                    self.tw.angular.z = 1.0
+                                continue
+                            
+                            # Draw a circle centered at centroid coordinates
+                            cv2.circle(current_frame, (round(cx), round(cy)), 5, (0, 255, 0), -1)
+                            
+                            #Find height/width of robot camera image from ros2 topic echo /camera/image_raw height: 1080 width: 1920
+
+                            #If center of object is to the left of image center move left
+                            if cx < 2.5 * data.width / 5:
+                                print("turning left")
+                                self.tw.angular.z = 0.3
+                                #To stop robot getting confused between two cubes
+                                self.leftRight += 1
+                                self.count += 1
+                            #Else if center of object is to the right of image center move right
+                            elif cx >= 3.5 * data.width / 5:
+                                print("turning right")
+                                self.tw.angular.z = -0.3
+                                #To stop robot getting confused between two cubes
+                                self.leftRight += 1
+                                self.count += 1
+                            else: 
+                                #If robot not at wall
+                                if self.scan.ranges[90] > 0.6:
+                                    #Get the depth of the cube
+                                    cubeDepth = (self.get_depth(current_frame, c) / 100)
+                                    #If the difference between the wall and the cube is less than 0.03
+                                    if (abs(self.scan.ranges[90] - cubeDepth)) < 0.03:
+                                        #Big turn so we don't keep getting stuck on the same cube again
+                                        self.tw.angular.z = 3.0
+                                        break
+                                    
+                                    #Move towards object
+                                    print("Moving towards object")
+                                    self.tw.angular.z = 0.0
+                                    self.tw.linear.x = 0.5
+                                    
+                                    #Check if cube is at the very bottom of the screen and if it is then the robot is pushing the object
+                                    if cy >= (3 * data.height / 4):
+                                        self.pushObject = True
+                                        break
+                                else:
+                                    #If at the wall then big turn to see other cubes
+                                    print("At wall, turning")
+                                    self.tw.angular.z=3.0
+                            break                   
+                else:
+                    #Turn until we can see a coloured object
+                    self.tw.angular.z=1.0
 
         #Publish the twist message to the robot
         self.pub_cmd_vel.publish(self.tw)
