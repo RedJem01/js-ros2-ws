@@ -14,7 +14,7 @@ from cv_bridge import CvBridge # Package to convert between ROS and OpenCV Image
 import cv2
 import numpy as np
 
-class ColourChaser(Node):
+class Assessment(Node):
     def __init__(self):
         super().__init__('colour_chaser')
         
@@ -29,7 +29,7 @@ class ColourChaser(Node):
         self.movedForwards = False
         
         self.leftRight = 0
-        self.callCount = 0
+        self.turnedToCubeLastCall = False
 
         #Publish cmd_vel topic to move the robot
         self.pub_cmd_vel = self.create_publisher(Twist, 'cmd_vel', 1)
@@ -65,22 +65,16 @@ class ColourChaser(Node):
         self.tw=Twist() #Twist message to publish
         
         #To stop robot getting confused between two cubes (if confused robot will turn left and right over and over again)
-        if self.count == 10 & self.leftRight == 10:
-            #Set big turn so that robot can stop the loop
-            self.tw.angular.x = 2.0
-            self.count = 0
+        print(self.leftRight)
+        if self.leftRight >= 10:
+            #Set movement so that robot can stop the loop
+            self.tw.linear.x = 1.0
             self.leftRight = 0
         else:
             #If robot is currently in front of an object than pushObject = True
             #This part runs twice every time push object is set to true, once to move forwards and then another to move backwards so that the robot can see if it still has the cube with it
             if self.pushObject == True:
-                if self.movedForwards == False:
-                    self.tw.linear.x = 1.0
-                    self.movedForwards = True
-                else:
-                    self.tw.linear.x = -2.0
-                    self.movedForwards = False
-                    self.pushObject = False  
+                self.push_object()
             else:
                 if len(green_contours) > 0:
                     for c in green_contours:
@@ -101,30 +95,25 @@ class ColourChaser(Node):
                             
                             # Draw a circle centered at centroid coordinates
                             cv2.circle(current_frame, (round(cx), round(cy)), 5, (0, 255, 0), -1)
-                            
-                            #Find height/width of robot camera image from ros2 topic echo /camera/image_raw height: 1080 width: 1920
 
                             #If center of object is to the left of image center move left
-                            if cx < 2.5 * data.width / 5:
+                            if cx < 2 * data.width / 5:
                                 print("turning left")
                                 self.tw.angular.z = 0.3
-                                #To stop robot getting confused between two cubes
-                                self.leftRight += 1
-                                self.count += 1
+                                self.stop_looping()
                             #Else if center of object is to the right of image center move right
-                            elif cx >= 3.5 * data.width / 5:
+                            elif cx >= 3 * data.width / 5:
                                 print("turning right")
                                 self.tw.angular.z = -0.3
-                                #To stop robot getting confused between two cubes
-                                self.leftRight += 1
-                                self.count += 1
+                                self.stop_looping()
                             else: 
+                                self.turnedToCubeLastCall = False
                                 #If robot not at wall
                                 if self.scan.ranges[90] > 0.6:
                                     #Get the depth of the cube
                                     cubeDepth = (self.get_depth(current_frame, c) / 100)
                                     #If the difference between the wall and the cube is less than 0.03
-                                    if (abs(self.scan.ranges[90] - cubeDepth)) < 0.03:
+                                    if (abs(self.scan.ranges[90] - cubeDepth)) < 0.02:
                                         #Big turn so we don't keep getting stuck on the same cube again
                                         self.tw.angular.z = 3.0
                                         break
@@ -144,39 +133,65 @@ class ColourChaser(Node):
                                     self.tw.angular.z=3.0
                             break                   
                 else:
+                    self.turnedToCubeLastCall = False
                     #Turn until we can see a coloured object
                     self.tw.angular.z=1.0
 
         #Publish the twist message to the robot
+        print(self.tw)
         self.pub_cmd_vel.publish(self.tw)
 
         #Show the cv images
         current_frame_contours_small = cv2.resize(current_frame_contours, (0,0), fx=0.4, fy=0.4) # reduce image size
         cv2.imshow("Image window", current_frame_contours_small)
         cv2.waitKey(1)
-
+        
+    def push_object(self):
+        #Robot is not turning to a cube this call
+        self.turnedToCubeLastCall = False
+        #If push object is true and the robot has not moved forwards yet
+        if self.movedForwards == False:
+            #Move forwards
+            self.tw.linear.x = 1.0
+            self.movedForwards = True
+        #If has moved forwards
+        else:
+            #Move backwards
+            self.tw.linear.x = -2.0
+            self.movedForwards = False
+            self.pushObject = False    
+        
+    #Adapted from https://pyimagesearch.com/2015/05/25/basic-motion-detection-and-tracking-with-python-and-opencv/
     def get_depth(self, current_frame, c):
-        #Get depth
+        #Get depth by drawing box around the contour then getting the mean of the pixel at the top right of the box
         x, y, w, h = cv2.boundingRect(c)
         objectDepth = current_frame[y:y+h, x:x+w]
         return np.mean(objectDepth)
+    
+    def stop_looping(self):
+        #To stop robot getting confused between two cubes
+        if self.turnedToCubeLastCall == True:
+            self.leftRight += 1
+        else:
+            self.leftRight = 1
+        self.turnedToCubeLastCall = True
 
     def set_scan(self, laserScan):
         self.scan = laserScan
 
 def main(args=None):
-    print('Starting colour_chaser.py.')
+    print('Starting Assessment.py.')
 
     rclpy.init(args=args)
 
-    colour_chaser = ColourChaser()
+    assessment = Assessment()
 
-    rclpy.spin(colour_chaser)
+    rclpy.spin(assessment)
 
     # Destroy the node explicitly
     # (optional - otherwise it will be done automatically
     # when the garbage collector destroys the node object)
-    colour_chaser.destroy_node()
+    assessment.destroy_node()
     rclpy.shutdown()
 
 if __name__ == '__main__':
